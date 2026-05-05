@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
@@ -15,6 +17,7 @@ from config import get_settings
 from services.booking import get_or_create_user
 
 router = Router(name="common")
+logger = logging.getLogger(__name__)
 
 
 def main_menu_keyboard(is_master: bool) -> InlineKeyboardMarkup:
@@ -90,6 +93,12 @@ async def menu_master_message(message: Message) -> None:
     from bot.handlers.master import send_master_menu
 
     if not get_settings().is_master(message.from_user.id):
+        logger.info(
+            "Master access denied: telegram_id=%s username=%s configured_master_ids=%s",
+            message.from_user.id,
+            message.from_user.username,
+            sorted(get_settings().master_ids),
+        )
         await message.answer("Нет доступа.")
         return
     await send_master_menu(message)
@@ -100,6 +109,12 @@ async def menu_master(callback: CallbackQuery) -> None:
     from bot.handlers.master import open_master_menu
 
     if not get_settings().is_master(callback.from_user.id):
+        logger.info(
+            "Master access denied: telegram_id=%s username=%s configured_master_ids=%s",
+            callback.from_user.id,
+            callback.from_user.username,
+            sorted(get_settings().master_ids),
+        )
         await callback.answer("Нет доступа", show_alert=True)
         return
     await open_master_menu(callback)
