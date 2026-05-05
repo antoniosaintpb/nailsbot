@@ -21,6 +21,7 @@ from services.booking import (
     appointment_stats,
     delete_free_slot,
     get_master_settings,
+    local_dt,
     list_slots_for_day_master,
 )
 
@@ -138,7 +139,7 @@ async def master_day(cq: CallbackQuery, session: AsyncSession) -> None:
     lines = [f"День {d.strftime('%d.%m.%Y')}"]
     rows: list[list[InlineKeyboardButton]] = []
     for s in slots:
-        tstr = s.starts_at.astimezone(tz).strftime("%H:%M")
+        tstr = local_dt(s.starts_at).strftime("%H:%M")
         mark = "🟢" if s.status == SlotStatus.free else "🔒"
         lines.append(f"{mark} {tstr} ({s.duration_min} мин)")
         if s.status == SlotStatus.free:
@@ -200,12 +201,12 @@ async def master_add_slot(cq: CallbackQuery, session: AsyncSession) -> None:
         await session.rollback()
         await cq.answer("Слот на это время уже есть.", show_alert=True)
         return
-    d = starts.astimezone(tz).date()
+    d = local_dt(starts).date()
     slots = await list_slots_for_day_master(session, d)
     lines = [f"День {d.strftime('%d.%m.%Y')}"]
     rows: list[list[InlineKeyboardButton]] = []
     for s in slots:
-        tstr = s.starts_at.astimezone(tz).strftime("%H:%M")
+        tstr = local_dt(s.starts_at).strftime("%H:%M")
         mark = "🟢" if s.status == SlotStatus.free else "🔒"
         lines.append(f"{mark} {tstr} ({s.duration_min} мин)")
         if s.status == SlotStatus.free:
@@ -233,7 +234,7 @@ async def master_del_slot(cq: CallbackQuery, session: AsyncSession) -> None:
     tz = _tz()
     r0 = await session.execute(select(AvailabilitySlot).where(AvailabilitySlot.id == sid))
     old = r0.scalar_one_or_none()
-    d_old = old.starts_at.astimezone(tz).date() if old else None
+    d_old = local_dt(old.starts_at).date() if old else None
     try:
         ok = await delete_free_slot(session, sid)
     except BookingError as e:
@@ -248,7 +249,7 @@ async def master_del_slot(cq: CallbackQuery, session: AsyncSession) -> None:
         lines = [f"День {d_old.strftime('%d.%m.%Y')}"]
         rows: list[list[InlineKeyboardButton]] = []
         for s in slots:
-            tstr = s.starts_at.astimezone(tz).strftime("%H:%M")
+            tstr = local_dt(s.starts_at).strftime("%H:%M")
             mark = "🟢" if s.status == SlotStatus.free else "🔒"
             lines.append(f"{mark} {tstr} ({s.duration_min} мин)")
             if s.status == SlotStatus.free:

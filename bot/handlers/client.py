@@ -27,6 +27,7 @@ from services.booking import (
     create_booking,
     days_with_free_slots,
     get_master_settings,
+    local_dt,
     list_active_services,
     list_free_slots_for_day,
     list_user_upcoming_appointments,
@@ -132,9 +133,8 @@ async def client_cal_day(cq: CallbackQuery, session: AsyncSession, state: FSMCon
     await state.update_data(booking_day=d.isoformat())
     rows: list[list[InlineKeyboardButton]] = []
     row: list[InlineKeyboardButton] = []
-    tz = _tz()
     for i, sl in enumerate(slots):
-        lt = sl.starts_at.astimezone(tz).strftime("%H:%M")
+        lt = local_dt(sl.starts_at).strftime("%H:%M")
         row.append(InlineKeyboardButton(text=lt, callback_data=f"{CB_SLOT}:{sl.id}"))
         if len(row) == 4:
             rows.append(row)
@@ -159,9 +159,8 @@ async def client_back_to_slots(cq: CallbackQuery, session: AsyncSession, state: 
         return
     rows: list[list[InlineKeyboardButton]] = []
     row: list[InlineKeyboardButton] = []
-    tz = _tz()
     for sl in slots:
-        lt = sl.starts_at.astimezone(tz).strftime("%H:%M")
+        lt = local_dt(sl.starts_at).strftime("%H:%M")
         row.append(InlineKeyboardButton(text=lt, callback_data=f"{CB_SLOT}:{sl.id}"))
         if len(row) == 4:
             rows.append(row)
@@ -263,8 +262,7 @@ async def booking_confirm(cq: CallbackQuery, session: AsyncSession, state: FSMCo
             contact_phone=str(data["contact_phone"]),
         )
         slot = appt.slot
-        tz = _tz()
-        when = slot.starts_at.astimezone(tz).strftime("%d.%m.%Y %H:%M")
+        when = local_dt(slot.starts_at).strftime("%d.%m.%Y %H:%M")
         tg_line = (
             f"Telegram: @{cq.from_user.username}"
             if cq.from_user and cq.from_user.username
@@ -308,9 +306,8 @@ async def show_my_appointments(callback: CallbackQuery, session: AsyncSession) -
         )
         return
     rows: list[list[InlineKeyboardButton]] = []
-    tz = _tz()
     for a in items:
-        when = a.slot.starts_at.astimezone(tz).strftime("%d.%m %H:%M")
+        when = local_dt(a.slot.starts_at).strftime("%d.%m %H:%M")
         label = f"{when} — {a.service_name_snapshot}"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"{CB_RESCHED_PICK}:{a.id}")])
     rows.append([InlineKeyboardButton(text="« Меню", callback_data="mn:home")])
@@ -327,9 +324,8 @@ async def send_my_appointments(message: Message, session: AsyncSession) -> None:
         await message.answer("У вас нет предстоящих записей.")
         return
     rows: list[list[InlineKeyboardButton]] = []
-    tz = _tz()
     for a in items:
-        when = a.slot.starts_at.astimezone(tz).strftime("%d.%m %H:%M")
+        when = local_dt(a.slot.starts_at).strftime("%d.%m %H:%M")
         label = f"{when} — {a.service_name_snapshot}"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"{CB_RESCHED_PICK}:{a.id}")])
     await message.answer(
@@ -391,9 +387,8 @@ async def resched_cal_day(cq: CallbackQuery, session: AsyncSession, state: FSMCo
     await state.update_data(reschedule_day=d.isoformat())
     rows: list[list[InlineKeyboardButton]] = []
     row: list[InlineKeyboardButton] = []
-    tz = _tz()
     for sl in slots:
-        lt = sl.starts_at.astimezone(tz).strftime("%H:%M")
+        lt = local_dt(sl.starts_at).strftime("%H:%M")
         row.append(InlineKeyboardButton(text=lt, callback_data=f"{CB_SLOT}:r:{sl.id}"))
         if len(row) == 4:
             rows.append(row)
@@ -422,8 +417,7 @@ async def resched_pick_slot(cq: CallbackQuery, session: AsyncSession, state: FSM
             new_slot_id=new_sid,
         )
         slot = appt.slot
-        tz = _tz()
-        when = slot.starts_at.astimezone(tz).strftime("%d.%m.%Y %H:%M")
+        when = local_dt(slot.starts_at).strftime("%d.%m.%Y %H:%M")
         await notify_masters(
             cq.bot,
             "Перенос записи\n"

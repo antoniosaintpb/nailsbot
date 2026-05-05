@@ -20,6 +20,7 @@ from services.booking import (  # noqa: E402
     create_booking,
     days_with_free_slots,
     get_master_settings,
+    local_dt,
     list_active_services,
     list_free_slots_for_day,
     list_user_upcoming_appointments,
@@ -52,6 +53,7 @@ async def main() -> None:
         assert services, "seed service is missing"
         day_slots = await list_free_slots_for_day(session, start.date())
         assert len(day_slots) == 2, "free slots are missing"
+        assert local_dt(day_slots[0].starts_at).hour == 10, "slot time shifted from local timezone"
         free_days = await days_with_free_slots(session, start.year, start.month)
         assert start.day in free_days, "calendar does not mark free day"
 

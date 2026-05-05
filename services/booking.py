@@ -66,13 +66,24 @@ def _tz() -> ZoneInfo:
     return ZoneInfo(get_settings().timezone)
 
 
+def local_dt(value: datetime) -> datetime:
+    """Return datetime in bot timezone without shifting naive SQLite values."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=_tz())
+    return value.astimezone(_tz())
+
+
+def db_dt(value: datetime) -> datetime:
+    """Store/query local wall-clock time in SQLite without timezone offset surprises."""
+    return local_dt(value).replace(tzinfo=None)
+
+
 def month_range_local(year: int, month: int) -> tuple[datetime, datetime]:
-    tz = _tz()
-    start = datetime(year, month, 1, 0, 0, 0, tzinfo=tz)
+    start = datetime(year, month, 1, 0, 0, 0)
     if month == 12:
-        end = datetime(year + 1, 1, 1, 0, 0, 0, tzinfo=tz)
+        end = datetime(year + 1, 1, 1, 0, 0, 0)
     else:
-        end = datetime(year, month + 1, 1, 0, 0, 0, tzinfo=tz)
+        end = datetime(year, month + 1, 1, 0, 0, 0)
     return start, end
 
 
@@ -88,16 +99,14 @@ async def days_with_free_slots(session: AsyncSession, year: int, month: int) -> 
         )
     )
     days: set[int] = set()
-    tz = _tz()
     for (st,) in r2.all():
-        local = st.astimezone(tz)
+        local = local_dt(st)
         days.add(local.day)
     return days
 
 
 async def list_free_slots_for_day(session: AsyncSession, d: date) -> list[AvailabilitySlot]:
-    tz = _tz()
-    start = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=tz)
+    start = datetime(d.year, d.month, d.day, 0, 0, 0)
     end = start + timedelta(days=1)
     r = await session.execute(
         select(AvailabilitySlot)
@@ -163,8 +172,7 @@ async def create_booking(
 
 
 async def list_user_upcoming_appointments(session: AsyncSession, telegram_id: int) -> list[Appointment]:
-    tz = _tz()
-    now = datetime.now(tz)
+    now = db_dt(datetime.now(_tz()))
     r = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = r.scalar_one_or_none()
     if user is None:
@@ -216,7 +224,7 @@ async def reschedule_appointment(
     if old_slot is None:
         raise BookingError("Слот не найден")
 
-    cutoff = old_slot.starts_at.astimezone(tz) - timedelta(hours=deadline_h)
+    cutoff = local_dt(old_slot.starts_at) - timedelta(hours=deadline_h)
     if now >= cutoff:
         raise RescheduleNotAllowedError()
 
@@ -238,8 +246,7 @@ async def reschedule_appointment(
 async def add_slot(session: AsyncSession, starts_at: datetime, duration_min: int | None = None) -> AvailabilitySlot:
     ms = await get_master_settings(session)
     d = duration_min if duration_min is not None else ms.default_slot_duration_min
-    if starts_at.tzinfo is None:
-        starts_at = starts_at.replace(tzinfo=_tz())
+    starts_at = db_dt(starts_at)
     slot = AvailabilitySlot(starts_at=starts_at, duration_min=d, status=SlotStatus.free)
     session.add(slot)
     try:
@@ -261,8 +268,7 @@ async def delete_free_slot(session: AsyncSession, slot_id: int) -> bool:
 
 
 async def list_slots_for_day_master(session: AsyncSession, d: date) -> list[AvailabilitySlot]:
-    tz = _tz()
-    start = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=tz)
+    start = datetime(d.year, d.month, d.day, 0, 0, 0)
     end = start + timedelta(days=1)
     r = await session.execute(
         select(AvailabilitySlot)
