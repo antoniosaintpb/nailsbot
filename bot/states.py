@@ -21,3 +21,8 @@ class MasterServiceStates(StatesGroup):
 
 class MasterSettingsStates(StatesGroup):
     deadline_hours = State()
+    default_duration = State()
+    work_start_hour = State()
+    work_end_hour = State()
+    slot_step = State()
+    booking_rules = State()

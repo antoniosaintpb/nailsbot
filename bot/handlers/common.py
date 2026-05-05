@@ -1,7 +1,14 @@
 from aiogram import F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
@@ -20,6 +27,15 @@ def main_menu_keyboard(is_master: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def bottom_menu_keyboard(is_master: bool) -> ReplyKeyboardMarkup:
+    rows = [
+        [KeyboardButton(text="Записаться"), KeyboardButton(text="Мои записи")],
+    ]
+    if is_master:
+        rows.append([KeyboardButton(text="Мастер")])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, session: AsyncSession) -> None:
     settings = get_settings()
@@ -27,9 +43,19 @@ async def cmd_start(message: Message, session: AsyncSession) -> None:
     is_m = settings.is_master(uid)
     await get_or_create_user(session, uid, is_master=is_m)
     await message.answer(
-        "Маникюр — запись через бота.\nВыберите действие:",
-        reply_markup=main_menu_keyboard(is_m),
+        "Привет! Это бот для записи на маникюр.\n\n"
+        "Через меню внизу можно выбрать свободный день, записаться, посмотреть свои записи"
+        + (" или открыть панель мастера." if is_m else "."),
+        reply_markup=bottom_menu_keyboard(is_m),
     )
+
+
+@router.message(F.text == "Записаться")
+async def menu_book_message(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    from bot.handlers.client import send_booking_calendar
+
+    await state.clear()
+    await send_booking_calendar(message, session)
 
 
 @router.callback_query(F.data == "mn:b")
@@ -41,6 +67,14 @@ async def menu_book(callback: CallbackQuery, session: AsyncSession, state: FSMCo
     await callback.answer()
 
 
+@router.message(F.text == "Мои записи")
+async def menu_my_message(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    from bot.handlers.client import send_my_appointments
+
+    await state.clear()
+    await send_my_appointments(message, session)
+
+
 @router.callback_query(F.data == "mn:m")
 async def menu_my(callback: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
     from bot.handlers.client import show_my_appointments
@@ -48,6 +82,17 @@ async def menu_my(callback: CallbackQuery, session: AsyncSession, state: FSMCont
     await state.clear()
     await show_my_appointments(callback, session)
     await callback.answer()
+
+
+@router.message(Command("master"))
+@router.message(F.text == "Мастер")
+async def menu_master_message(message: Message) -> None:
+    from bot.handlers.master import send_master_menu
+
+    if not get_settings().is_master(message.from_user.id):
+        await message.answer("Нет доступа.")
+        return
+    await send_master_menu(message)
 
 
 @router.callback_query(F.data == "mn:x")

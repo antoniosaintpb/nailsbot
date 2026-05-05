@@ -3,6 +3,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 
 from bot.handlers import client, common, master
 from bot.middlewares.db import DbSessionMiddleware
@@ -19,6 +20,12 @@ async def main() -> None:
 
     settings = get_settings()
     bot = Bot(settings.bot_token)
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="Открыть главное меню"),
+            BotCommand(command="master", description="Панель мастера"),
+        ]
+    )
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(DbSessionMiddleware())
     dp.include_router(common.router)

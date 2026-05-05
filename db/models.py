@@ -46,6 +46,19 @@ class MasterSettings(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     reschedule_deadline_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
     default_slot_duration_min: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    workday_start_hour: Mapped[int] = mapped_column(Integer, default=9, nullable=False)
+    workday_end_hour: Mapped[int] = mapped_column(Integer, default=21, nullable=False)
+    slot_step_min: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    booking_rules: Mapped[str] = mapped_column(
+        Text,
+        default=(
+            "Не приходите раньше чем за 30 минут до записи\n"
+            "Если не можете прийти — предупредите минимум за 24 часа\n"
+            "Принимаем клиентов от 13 лет\n"
+            "При опоздании более 15 минут запись может быть отменена"
+        ),
+        nullable=False,
+    )
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

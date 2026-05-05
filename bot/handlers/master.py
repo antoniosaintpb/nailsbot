@@ -38,8 +38,11 @@ def _is_master(uid: int) -> bool:
 def master_root_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Слоты (календарь)", callback_data="mx:sl")],
+            [InlineKeyboardButton(text="Рабочие часы и слоты", callback_data="mx:sl")],
+            [InlineKeyboardButton(text="Настройки рабочего дня", callback_data="mx:work")],
             [InlineKeyboardButton(text="Услуги и цены", callback_data="mx:sv")],
+            [InlineKeyboardButton(text="Длительность сеансов", callback_data="mx:dur")],
+            [InlineKeyboardButton(text="Правила записи", callback_data="mx:rules")],
             [InlineKeyboardButton(text="Срок переноса (часы)", callback_data="mx:st")],
             [InlineKeyboardButton(text="Статистика", callback_data="mx:sc")],
             [InlineKeyboardButton(text="« Главное меню", callback_data="mn:home")],
@@ -51,6 +54,13 @@ async def open_master_menu(cq: CallbackQuery) -> None:
     if not _is_master(cq.from_user.id):
         return
     await cq.message.edit_text("Панель мастера:", reply_markup=master_root_kb())
+
+
+async def send_master_menu(message: Message) -> None:
+    if not _is_master(message.from_user.id):
+        await message.answer("Нет доступа.")
+        return
+    await message.answer("Панель мастера:", reply_markup=master_root_kb())
 
 
 @router.callback_query(F.data == "mx:sl")
@@ -97,20 +107,20 @@ async def master_month(cq: CallbackQuery, session: AsyncSession) -> None:
     await cq.answer()
 
 
-def _time_add_buttons(d: date) -> InlineKeyboardMarkup:
+def _time_add_buttons(d: date, *, start_hour: int, end_hour: int, step_min: int) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     row: list[InlineKeyboardButton] = []
-    start_min = 9 * 60
-    end_min = 21 * 60
+    start_min = start_hour * 60
+    end_min = end_hour * 60
     t = start_min
-    while t <= end_min:
+    while t < end_min:
         h, mm = divmod(t, 60)
         suf = f"{d.year:04d}{d.month:02d}{d.day:02d}{h:02d}{mm:02d}"
         row.append(InlineKeyboardButton(text=f"{h:02d}:{mm:02d}", callback_data=f"ma:{suf}"))
         if len(row) == 4:
             rows.append(row)
             row = []
-        t += 30
+        t += step_min
     if row:
         rows.append(row)
     rows.append([InlineKeyboardButton(text="« К дню", callback_data=f"{MB_DAY}:{d.isoformat()}")])
@@ -148,14 +158,22 @@ async def master_day(cq: CallbackQuery, session: AsyncSession) -> None:
 
 
 @router.callback_query(F.data.startswith("mt:"))
-async def master_time_grid(cq: CallbackQuery) -> None:
+async def master_time_grid(cq: CallbackQuery, session: AsyncSession) -> None:
     if not _is_master(cq.from_user.id):
         await cq.answer()
         return
     d = date.fromisoformat(cq.data.split(":", 1)[1])
+    settings = await get_master_settings(session)
     await cq.message.edit_text(
-        f"Время для {d.strftime('%d.%m.%Y')} (шаг 30 мин):",
-        reply_markup=_time_add_buttons(d),
+        f"Время для {d.strftime('%d.%m.%Y')}\n"
+        f"Рабочие часы: {settings.workday_start_hour}:00–{settings.workday_end_hour}:00\n"
+        f"Шаг: {settings.slot_step_min} мин, длительность сеанса: {settings.default_slot_duration_min} мин",
+        reply_markup=_time_add_buttons(
+            d,
+            start_hour=settings.workday_start_hour,
+            end_hour=settings.workday_end_hour,
+            step_min=settings.slot_step_min,
+        ),
     )
     await cq.answer()
 
@@ -281,6 +299,188 @@ async def master_services_menu(cq: CallbackQuery, session: AsyncSession, *, skip
 async def master_back(cq: CallbackQuery) -> None:
     await open_master_menu(cq)
     await cq.answer()
+
+
+@router.callback_query(F.data == "mx:work")
+async def master_workday_menu(cq: CallbackQuery, session: AsyncSession) -> None:
+    if not _is_master(cq.from_user.id):
+        await cq.answer()
+        return
+    settings = await get_master_settings(session)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Начало рабочего дня", callback_data="wk:start")],
+            [InlineKeyboardButton(text="Конец рабочего дня", callback_data="wk:end")],
+            [InlineKeyboardButton(text="Шаг выбора времени", callback_data="wk:step")],
+            [InlineKeyboardButton(text="« Назад", callback_data="mx:back")],
+        ]
+    )
+    await cq.message.edit_text(
+        "Настройки рабочего дня:\n"
+        f"Начало: {settings.workday_start_hour}:00\n"
+        f"Конец: {settings.workday_end_hour}:00\n"
+        f"Шаг времени: {settings.slot_step_min} мин",
+        reply_markup=kb,
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data.startswith("wk:"))
+async def master_workday_field(cq: CallbackQuery, state: FSMContext) -> None:
+    if not _is_master(cq.from_user.id):
+        await cq.answer()
+        return
+    field = cq.data.split(":", 1)[1]
+    if field == "start":
+        await state.set_state(MasterSettingsStates.work_start_hour)
+        await cq.message.edit_text("Введите час начала рабочего дня (0–23), например 10:")
+    elif field == "end":
+        await state.set_state(MasterSettingsStates.work_end_hour)
+        await cq.message.edit_text("Введите час конца рабочего дня (1–24), например 21:")
+    elif field == "step":
+        await state.set_state(MasterSettingsStates.slot_step)
+        await cq.message.edit_text("Введите шаг выбора времени в минутах: 15, 30 или 60:")
+    await cq.answer()
+
+
+@router.message(MasterSettingsStates.work_start_hour, F.text)
+async def master_set_work_start(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    if not _is_master(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or not 0 <= int(raw) <= 23:
+        await message.answer("Введите целый час от 0 до 23.")
+        return
+    settings = await get_master_settings(session)
+    value = int(raw)
+    if value >= settings.workday_end_hour:
+        await message.answer("Начало должно быть раньше конца рабочего дня.")
+        return
+    settings.workday_start_hour = value
+    await state.clear()
+    await message.answer(f"Начало рабочего дня: {value}:00")
+
+
+@router.message(MasterSettingsStates.work_end_hour, F.text)
+async def master_set_work_end(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    if not _is_master(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or not 1 <= int(raw) <= 24:
+        await message.answer("Введите целый час от 1 до 24.")
+        return
+    settings = await get_master_settings(session)
+    value = int(raw)
+    if value <= settings.workday_start_hour:
+        await message.answer("Конец должен быть позже начала рабочего дня.")
+        return
+    settings.workday_end_hour = value
+    await state.clear()
+    await message.answer(f"Конец рабочего дня: {value}:00")
+
+
+@router.message(MasterSettingsStates.slot_step, F.text)
+async def master_set_slot_step(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    if not _is_master(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if raw not in {"15", "30", "60"}:
+        await message.answer("Введите 15, 30 или 60.")
+        return
+    settings = await get_master_settings(session)
+    settings.slot_step_min = int(raw)
+    await state.clear()
+    await message.answer(f"Шаг выбора времени: {raw} мин.")
+
+
+@router.callback_query(F.data == "mx:dur")
+async def master_duration_menu(cq: CallbackQuery, session: AsyncSession) -> None:
+    if not _is_master(cq.from_user.id):
+        await cq.answer()
+        return
+    settings = await get_master_settings(session)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Изменить длительность", callback_data="du:set")],
+            [InlineKeyboardButton(text="« Назад", callback_data="mx:back")],
+        ]
+    )
+    await cq.message.edit_text(
+        f"Текущая длительность новых сеансов: {settings.default_slot_duration_min} мин.\n"
+        "Она применяется к новым слотам. Для услуг длительность можно менять отдельно в «Услуги и цены».",
+        reply_markup=kb,
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data == "du:set")
+async def master_duration_custom(cq: CallbackQuery, state: FSMContext) -> None:
+    if not _is_master(cq.from_user.id):
+        await cq.answer()
+        return
+    await state.set_state(MasterSettingsStates.default_duration)
+    await cq.message.edit_text("Введите длительность новых сеансов в минутах, например 60, 90 или 120:")
+    await cq.answer()
+
+
+@router.message(MasterSettingsStates.default_duration, F.text)
+async def master_duration_set(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    if not _is_master(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or int(raw) < 5 or int(raw) > 600:
+        await message.answer("Введите число минут от 5 до 600.")
+        return
+    settings = await get_master_settings(session)
+    settings.default_slot_duration_min = int(raw)
+    await state.clear()
+    await message.answer(f"Длительность новых сеансов: {raw} мин.")
+
+
+@router.callback_query(F.data == "mx:rules")
+async def master_rules_menu(cq: CallbackQuery, session: AsyncSession) -> None:
+    if not _is_master(cq.from_user.id):
+        await cq.answer()
+        return
+    settings = await get_master_settings(session)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Изменить правила", callback_data="ru:set")],
+            [InlineKeyboardButton(text="« Назад", callback_data="mx:back")],
+        ]
+    )
+    await cq.message.edit_text(
+        "Текущие правила записи:\n\n" + settings.booking_rules,
+        reply_markup=kb,
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data == "ru:set")
+async def master_rules_custom(cq: CallbackQuery, state: FSMContext) -> None:
+    if not _is_master(cq.from_user.id):
+        await cq.answer()
+        return
+    await state.set_state(MasterSettingsStates.booking_rules)
+    await cq.message.edit_text(
+        "Отправьте правила одним сообщением.\n"
+        "Каждое правило лучше писать с новой строки."
+    )
+    await cq.answer()
+
+
+@router.message(MasterSettingsStates.booking_rules, F.text)
+async def master_rules_set(message: Message, session: AsyncSession, state: FSMContext) -> None:
+    if not _is_master(message.from_user.id):
+        return
+    text = (message.text or "").strip()
+    if len(text) < 5:
+        await message.answer("Правила слишком короткие.")
+        return
+    settings = await get_master_settings(session)
+    settings.booking_rules = text
+    await state.clear()
+    await message.answer("Правила записи обновлены.")
 
 
 @router.callback_query(F.data.startswith("sv:"))

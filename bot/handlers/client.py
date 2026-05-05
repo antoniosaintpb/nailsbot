@@ -26,6 +26,7 @@ from services.booking import (
     SlotTakenError,
     create_booking,
     days_with_free_slots,
+    get_master_settings,
     list_active_services,
     list_free_slots_for_day,
     list_user_upcoming_appointments,
@@ -51,6 +52,35 @@ def _max_booking_date() -> date:
 _not_rescheduling = ~StateFilter(RescheduleStates.choose_slot)
 
 
+async def _booking_calendar_text(session: AsyncSession) -> str:
+    settings = await get_master_settings(session)
+    rules = "\n".join(f"• {line}" for line in settings.booking_rules.splitlines() if line.strip())
+    if not rules:
+        rules = "• Правила пока не указаны"
+    return (
+        "Правила записи:\n"
+        f"{rules}\n\n"
+        "Выберите день (🟢 — есть свободные окна):"
+    )
+
+
+async def send_booking_calendar(message: Message, session: AsyncSession, ym: str | None = None) -> None:
+    today = _today()
+    if ym:
+        y, m = map(int, ym.split("-"))
+    else:
+        y, m = today.year, today.month
+    free = await days_with_free_slots(session, y, m)
+    kb = month_keyboard(
+        y,
+        m,
+        free,
+        min_date=today,
+        max_date=_max_booking_date(),
+    )
+    await message.answer(await _booking_calendar_text(session), reply_markup=kb)
+
+
 async def open_booking_calendar(callback: CallbackQuery, session: AsyncSession, ym: str | None = None) -> None:
     today = _today()
     if ym:
@@ -66,7 +96,7 @@ async def open_booking_calendar(callback: CallbackQuery, session: AsyncSession, 
         max_date=_max_booking_date(),
     )
     await callback.message.edit_text(
-        "Выберите день (🟢 — есть свободные окна):",
+        await _booking_calendar_text(session),
         reply_markup=kb,
     )
 
@@ -285,6 +315,24 @@ async def show_my_appointments(callback: CallbackQuery, session: AsyncSession) -
         rows.append([InlineKeyboardButton(text=label, callback_data=f"{CB_RESCHED_PICK}:{a.id}")])
     rows.append([InlineKeyboardButton(text="« Меню", callback_data="mn:home")])
     await callback.message.edit_text(
+        "Ваши записи. Нажмите, чтобы перенести на другое время:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+async def send_my_appointments(message: Message, session: AsyncSession) -> None:
+    uid = message.from_user.id
+    items = await list_user_upcoming_appointments(session, uid)
+    if not items:
+        await message.answer("У вас нет предстоящих записей.")
+        return
+    rows: list[list[InlineKeyboardButton]] = []
+    tz = _tz()
+    for a in items:
+        when = a.slot.starts_at.astimezone(tz).strftime("%d.%m %H:%M")
+        label = f"{when} — {a.service_name_snapshot}"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"{CB_RESCHED_PICK}:{a.id}")])
+    await message.answer(
         "Ваши записи. Нажмите, чтобы перенести на другое время:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
